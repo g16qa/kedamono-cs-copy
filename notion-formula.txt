@@ -1,0 +1,35 @@
+lets(
+  short,
+  [
+    if(empty(prop("ケダモノ名")), "", "【ケダモノ名】" + prop("ケダモノ名")),
+    if(empty(prop("ケダモノ種/亜種")), "", "【ケダモノ種/亜種】" + prop("ケダモノ種/亜種")),
+    if(empty(prop("権能")), "", "【権能】" + prop("権能").join("、")),
+    if(empty(prop("疑似餌の姿")), "", "【疑似餌の姿】" + prop("疑似餌の姿")),
+    if(empty(prop("欲望")), "", "【欲望】" + prop("欲望")),
+    if(empty(prop("住処")), "", "【住処】" + prop("住処")),
+    if(empty(prop("伝説")), "", "【伝説】" + prop("伝説")),
+    if(empty(prop("弱点")), "", "【弱点】" + prop("弱点")),
+    if(empty(prop("弱点の影響")), "", "【弱点の影響】" + prop("弱点の影響"))
+  ].filter(current != "").join("\n"),
+  long,
+  [
+    if(empty(prop("ケダモノの性格")), "", "【ケダモノの性格】\n" + prop("ケダモノの性格")),
+    if(empty(prop("疑似餌の性格")), "", "【疑似餌の性格】\n" + prop("疑似餌の性格")),
+    if(empty(prop("その他設定")), "", "【その他設定】\n" + prop("その他設定"))
+  ].filter(current != "").join("\n\n"),
+  text,
+  "```\n" + [short, long].filter(current != "").join("\n\n") + "\n```\n【CS URL】https://YOUR-DOMAIN.notion.site/" + id(),
+  link(
+    "📋 コピー",
+    "https://g16qa.github.io/kedamono-cs-copy/#" + text
+      .replaceAll("%", "%25")
+      .replaceAll("\n", "%0A")
+      .replaceAll(" ", "%20")
+      .replaceAll("　", "%E3%80%80")
+      .replaceAll("\t", "%09")
+      .replaceAll("\"", "%22")
+      .replaceAll("<", "%3C")
+      .replaceAll(">", "%3E")
+      .replaceAll("`", "%60")
+  )
+)
