@@ -29,6 +29,8 @@
   textarea {
     display: block; width: 100%; height: 50vh; margin-top: 16px; padding: 12px; resize: vertical;
   }
+  #url-option { display: flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; font-weight: 700; }
+  #url-option input { width: 18px; height: 18px; margin: 0; }
   #settings { margin-top: 20px; }
   summary { cursor: pointer; font-weight: 700; }
   #settings form { margin-top: 12px; }
@@ -44,6 +46,7 @@
 <p id="status" role="status" aria-live="polite"></p>
 <p id="hint"></p>
 <button id="copy" type="button">もう一度コピー</button>
+<label id="url-option"><input id="include-url" type="checkbox" checked>CS URLを付ける</label>
 <textarea id="text" readonly aria-label="コピーする内容"></textarea>
 
 <details id="settings">
@@ -56,8 +59,8 @@
       <button type="submit">保存</button>
     </div>
     <p id="settings-message" role="status" aria-live="polite"></p>
-    <p class="note">公開ページのURLを1つ貼ると、どのキャラにも【CS URL】が付きます。空にして保存すると付かなくなります。</p>
-    <p class="note">設定はこのブラウザだけに保存されます。公開していないキャラのURLは、他の人には開けません。</p>
+    <p class="note">未設定のときは、【CS URL】にNotion標準のURLを付けます。公開ページのURLを1つ貼ると、どのキャラも公開URLになります。</p>
+    <p class="note">設定はこのブラウザだけに保存されます。Web公開や共有をしていないページは、他の人には開けません。</p>
   </form>
 </details>
 
@@ -65,10 +68,14 @@
   // 内容はURLの#以降だけに入るので、サーバーへは送信されない
   // 新形式の#以降: 「ページID(32桁)」「改行」「本文」。ページIDがない形式もそのまま扱う
   const STORAGE_KEY = 'kedamono-cs-copy:site-origin';
+  const INCLUDE_URL_KEY = 'kedamono-cs-copy:include-url';
+  const DEFAULT_ORIGIN = 'https://www.notion.so';
   const statusEl = document.getElementById('status');
   const hintEl = document.getElementById('hint');
   const button = document.getElementById('copy');
   const area = document.getElementById('text');
+  const urlOption = document.getElementById('url-option');
+  const includeUrl = document.getElementById('include-url');
   const settings = document.getElementById('settings');
   const form = document.getElementById('settings-form');
   const siteInput = document.getElementById('site');
@@ -107,6 +114,26 @@
     }
   }
 
+  function loadIncludeUrl() {
+    try {
+      return localStorage.getItem(INCLUDE_URL_KEY) !== '0';
+    } catch {
+      return true;
+    }
+  }
+
+  function saveIncludeUrl(include) {
+    try {
+      if (include) {
+        localStorage.removeItem(INCLUDE_URL_KEY);
+      } else {
+        localStorage.setItem(INCLUDE_URL_KEY, '0');
+      }
+    } catch {
+      // 保存できなくても、このページの操作には影響しない
+    }
+  }
+
   // ページURL、ドメイン、example だけの入力を https の origin にそろえる。不正なら null
   function normalizeSite(input) {
     const value = input.trim();
@@ -122,9 +149,9 @@
     }
   }
 
-  function compose(page, origin) {
-    if (!page.pageId || !origin) return page.body;
-    return `${page.body}\n【CS URL】${origin}/${page.pageId}`;
+  function compose(page, origin, include) {
+    if (!page.pageId || !include) return page.body;
+    return `${page.body}\n【CS URL】${origin || DEFAULT_ORIGIN}/${page.pageId}`;
   }
 
   function show(state, message, hint) {
@@ -167,6 +194,7 @@
   const page = readHash();
   const hasContent = Boolean(page && page.body);
   siteInput.value = loadOrigin();
+  includeUrl.checked = loadIncludeUrl();
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
@@ -184,11 +212,15 @@
     siteInput.value = origin;
     settingsMessage.className = '';
     if (hasContent) {
-      area.value = compose(page, origin);
+      area.value = compose(page, origin, includeUrl.checked);
       await attempt();
-      settingsMessage.textContent = origin ? '保存して、CS URL付きでコピーし直しました。' : '保存して、CS URLなしでコピーし直しました。';
+      if (!includeUrl.checked) {
+        settingsMessage.textContent = origin ? '保存しました。今回はCS URLなしでコピーしています。' : '設定を消しました。今回はCS URLなしでコピーしています。';
+      } else {
+        settingsMessage.textContent = origin ? '保存して、公開URLでコピーし直しました。' : '設定を消して、Notion標準のURLでコピーし直しました。';
+      }
     } else {
-      settingsMessage.textContent = origin ? '保存しました。' : 'CS URLの設定を消しました。';
+      settingsMessage.textContent = origin ? '保存しました。' : '設定を消しました。Notion標準のURLを使います。';
     }
   });
 
@@ -197,22 +229,30 @@
     button.hidden = true;
     area.hidden = true;
     settings.hidden = true;
+    urlOption.hidden = true;
   } else if (!hasContent) {
     show('', 'CS URLの設定', 'Notionのコピー列のリンクを開くと、CSをコピーできます。');
     button.hidden = true;
     area.hidden = true;
     settings.open = true;
+    urlOption.hidden = true;
   } else {
-    // 古い形式のリンクはページIDを持たないので、設定欄は出さない
+    // 古い形式のリンクはページIDを持たないので、チェックと設定欄は出さない
     settings.hidden = !page.pageId;
-    area.value = compose(page, loadOrigin());
+    urlOption.hidden = !page.pageId;
+    area.value = compose(page, loadOrigin(), includeUrl.checked);
     document.title = 'CSコピー: ' + page.body.replace(/^```\n/, '').split('\n')[0].replace(/^【[^】]*】/, '');
     button.addEventListener('click', attempt);
+    includeUrl.addEventListener('change', () => {
+      saveIncludeUrl(includeUrl.checked);
+      area.value = compose(page, loadOrigin(), includeUrl.checked);
+      attempt();
+    });
     // 自動コピーが拒否されたときの代替: タブのフォーカス時と最初のクリックで再試行する
     const retry = () => { if (!copied) attempt(); };
     window.addEventListener('focus', retry);
     document.addEventListener('pointerdown', (event) => {
-      if (event.target !== button && !settings.contains(event.target)) retry();
+      if (event.target !== button && !settings.contains(event.target) && !urlOption.contains(event.target)) retry();
     });
     attempt();
   }
