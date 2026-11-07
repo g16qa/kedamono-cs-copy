@@ -18,7 +18,7 @@ lets(
     if(empty(prop("その他設定")), "", "【その他設定】\n" + prop("その他設定"))
   ].filter(current != "").join("\n\n"),
   text,
-  "```\n" + [short, long].filter(current != "").join("\n\n") + "\n```\n【CS URL】https://YOUR-DOMAIN.notion.site/" + id(),
+  id() + "\n```\n" + [short, long].filter(current != "").join("\n\n") + "\n```",
   link(
     "📋 コピー",
     "https://g16qa.github.io/kedamono-cs-copy/#" + text

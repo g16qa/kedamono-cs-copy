@@ -9,6 +9,7 @@
 <style>
   :root { color-scheme: light dark; --accent: #2f7d5b; --warn: #b4552d; }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     margin: 0 auto; padding: 24px 16px; max-width: 720px;
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
@@ -22,10 +23,21 @@
     font: inherit; font-weight: 700; color: #fff; background: var(--accent);
     border: 0; border-radius: 8px; padding: 10px 20px; cursor: pointer;
   }
-  textarea {
-    display: block; width: 100%; height: 60vh; margin-top: 16px; padding: 12px;
-    font: inherit; border: 1px solid #8884; border-radius: 8px; resize: vertical;
+  textarea, input {
+    font: inherit; border: 1px solid #8884; border-radius: 8px;
   }
+  textarea {
+    display: block; width: 100%; height: 50vh; margin-top: 16px; padding: 12px; resize: vertical;
+  }
+  #settings { margin-top: 20px; }
+  summary { cursor: pointer; font-weight: 700; }
+  #settings form { margin-top: 12px; }
+  #settings label { display: block; margin-bottom: 6px; font-size: .9rem; }
+  .row { display: flex; gap: 8px; }
+  .row input { flex: 1; min-width: 0; padding: 10px 12px; }
+  .note { margin: 8px 0 0; font-size: .85rem; opacity: .75; }
+  #settings-message { margin: 8px 0 0; font-size: .9rem; font-weight: 700; }
+  #settings-message.error { color: var(--warn); }
 </style>
 </head>
 <body>
@@ -33,20 +45,86 @@
 <p id="hint"></p>
 <button id="copy" type="button">もう一度コピー</button>
 <textarea id="text" readonly aria-label="コピーする内容"></textarea>
+
+<details id="settings">
+  <summary>CS URLの設定</summary>
+  <form id="settings-form">
+    <label for="site">公開したNotionページのURL</label>
+    <div class="row">
+      <input id="site" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+             placeholder="https://example.notion.site/...">
+      <button type="submit">保存</button>
+    </div>
+    <p id="settings-message" role="status" aria-live="polite"></p>
+    <p class="note">公開ページのURLを1つ貼ると、どのキャラにも【CS URL】が付きます。空にして保存すると付かなくなります。</p>
+    <p class="note">設定はこのブラウザだけに保存されます。公開していないキャラのURLは、他の人には開けません。</p>
+  </form>
+</details>
+
 <script>
   // 内容はURLの#以降だけに入るので、サーバーへは送信されない
+  // 新形式の#以降: 「ページID(32桁)」「改行」「本文」。ページIDがない形式もそのまま扱う
+  const STORAGE_KEY = 'kedamono-cs-copy:site-origin';
   const statusEl = document.getElementById('status');
   const hintEl = document.getElementById('hint');
   const button = document.getElementById('copy');
   const area = document.getElementById('text');
+  const settings = document.getElementById('settings');
+  const form = document.getElementById('settings-form');
+  const siteInput = document.getElementById('site');
+  const settingsMessage = document.getElementById('settings-message');
 
   function readHash() {
     const raw = location.hash.slice(1);
+    let decoded;
     try {
-      return decodeURIComponent(raw);
+      decoded = decodeURIComponent(raw);
     } catch {
       return null;
     }
+    const match = decoded.match(/^([0-9a-f]{32})\n([\s\S]*)$/);
+    return match ? { pageId: match[1], body: match[2] } : { pageId: null, body: decoded };
+  }
+
+  function loadOrigin() {
+    try {
+      return localStorage.getItem(STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  }
+
+  function saveOrigin(origin) {
+    try {
+      if (origin) {
+        localStorage.setItem(STORAGE_KEY, origin);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // ページURL、ドメイン、example だけの入力を https の origin にそろえる。不正なら null
+  function normalizeSite(input) {
+    const value = input.trim();
+    if (!value) return '';
+    if (/^[a-z0-9-]+$/i.test(value)) return `https://${value.toLowerCase()}.notion.site`;
+    try {
+      const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `https://${value}`);
+      if (url.protocol !== 'https:' || !url.hostname.includes('.')) return null;
+      if (url.hostname === 'app.notion.com' || url.hostname.endsWith('notion.so')) return null;
+      return url.origin;
+    } catch {
+      return null;
+    }
+  }
+
+  function compose(page, origin) {
+    if (!page.pageId || !origin) return page.body;
+    return `${page.body}\n【CS URL】${origin}/${page.pageId}`;
   }
 
   function show(state, message, hint) {
@@ -86,24 +164,55 @@
     return copied;
   }
 
-  const text = readHash();
-  if (text === null) {
+  const page = readHash();
+  const hasContent = Boolean(page && page.body);
+  siteInput.value = loadOrigin();
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const origin = normalizeSite(siteInput.value);
+    if (origin === null) {
+      settingsMessage.className = 'error';
+      settingsMessage.textContent = 'notion.site などの公開URLを入れてください。編集画面のURLは使えません。';
+      return;
+    }
+    if (!saveOrigin(origin)) {
+      settingsMessage.className = 'error';
+      settingsMessage.textContent = 'このブラウザでは設定を保存できませんでした。';
+      return;
+    }
+    siteInput.value = origin;
+    settingsMessage.className = '';
+    if (hasContent) {
+      area.value = compose(page, origin);
+      await attempt();
+      settingsMessage.textContent = origin ? '保存して、CS URL付きでコピーし直しました。' : '保存して、CS URLなしでコピーし直しました。';
+    } else {
+      settingsMessage.textContent = origin ? '保存しました。' : 'CS URLの設定を消しました。';
+    }
+  });
+
+  if (page === null) {
     show('wait', 'リンクの内容を読み取れませんでした', 'Notionのコピー列からもう一度開いてください。');
     button.hidden = true;
     area.hidden = true;
-  } else if (text === '') {
-    show('wait', 'コピーする内容がありません', 'Notionのコピー列のリンクから開いてください。');
+    settings.hidden = true;
+  } else if (!hasContent) {
+    show('', 'CS URLの設定', 'Notionのコピー列のリンクを開くと、CSをコピーできます。');
     button.hidden = true;
     area.hidden = true;
+    settings.open = true;
   } else {
-    area.value = text;
-    document.title = 'CSコピー: ' + text.split('\n')[0].replace(/^【[^】]*】/, '');
+    // 古い形式のリンクはページIDを持たないので、設定欄は出さない
+    settings.hidden = !page.pageId;
+    area.value = compose(page, loadOrigin());
+    document.title = 'CSコピー: ' + page.body.replace(/^```\n/, '').split('\n')[0].replace(/^【[^】]*】/, '');
     button.addEventListener('click', attempt);
     // 自動コピーが拒否されたときの代替: タブのフォーカス時と最初のクリックで再試行する
     const retry = () => { if (!copied) attempt(); };
     window.addEventListener('focus', retry);
     document.addEventListener('pointerdown', (event) => {
-      if (event.target !== button) retry();
+      if (event.target !== button && !settings.contains(event.target)) retry();
     });
     attempt();
   }
